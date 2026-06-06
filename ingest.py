@@ -1,4 +1,5 @@
 import os
+import re
 import chromadb
 from sentence_transformers import SentenceTransformer
 
@@ -13,8 +14,6 @@ def load_chunks(filepath):
     lines = content.split("\n")
 
     chunks = []
-    current_title = ""
-    current_lines = []
     doc_meta = {"versao": "", "ultima_atualizacao": "", "responsavel": "", "classificacao": ""}
 
     meta_fields = {
@@ -26,34 +25,53 @@ def load_chunks(filepath):
         "**Status:**": "classificacao",
     }
 
+    # heading_stack[level] = title — tracks the active heading at each depth
+    heading_stack = {}
+    current_level = None
+    current_title = ""
+    current_lines = []
+
+    def flush_chunk():
+        text = "\n".join(current_lines).strip()
+        if not text or not current_title:
+            return
+        path_parts = [heading_stack[l] for l in sorted(heading_stack) if 2 <= l <= current_level]
+        section_path = " > ".join(path_parts) if path_parts else current_title
+        parent = heading_stack.get(current_level - 1, "")
+        chunks.append({
+            "id": f"{filename}::{section_path}",
+            "text": f"{section_path}\n{text}",
+            "source": filename,
+            "section": current_title,
+            "parent_section": parent,
+            "section_path": section_path,
+            "heading_level": current_level,
+            **doc_meta,
+        })
+        current_lines.clear()
+
     for line in lines:
         for prefix, key in meta_fields.items():
             if line.startswith(prefix):
                 doc_meta[key] = line[len(prefix):].strip()
                 break
 
-        if line.startswith("### "):
-            if current_lines:
-                chunks.append({
-                    "id": f"{filename}::{current_title}",
-                    "text": f"{current_title}\n" + "\n".join(current_lines).strip(),
-                    "source": filename,
-                    "section": current_title,
-                    **doc_meta,
-                })
-            current_title = line.strip("# ").strip()
-            current_lines = []
+        # Match headings at level 2+ (skip the document title at level 1)
+        m = re.match(r'^(#{2,6})\s+(.*)', line)
+        if m:
+            flush_chunk()
+            level = len(m.group(1))
+            title = m.group(2).strip()
+            # Invalidate all headings at this level and deeper
+            for l in [l for l in heading_stack if l >= level]:
+                del heading_stack[l]
+            heading_stack[level] = title
+            current_level = level
+            current_title = title
         else:
             current_lines.append(line)
 
-    if current_lines and current_title:
-        chunks.append({
-            "id": f"{filename}::{current_title}",
-            "text": f"{current_title}\n" + "\n".join(current_lines).strip(),
-            "source": filename,
-            "section": current_title,
-            **doc_meta,
-        })
+    flush_chunk()
 
     return chunks
 
@@ -89,6 +107,9 @@ def main():
         metadatas=[{
             "source": c["source"],
             "section": c["section"],
+            "parent_section": c["parent_section"],
+            "section_path": c["section_path"],
+            "heading_level": c["heading_level"],
             "versao": c["versao"],
             "ultima_atualizacao": c["ultima_atualizacao"],
             "responsavel": c["responsavel"],
