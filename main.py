@@ -1,5 +1,5 @@
 import chromadb
-from sentence_transformers import SentenceTransformer
+from sentence_transformers import SentenceTransformer, CrossEncoder
 
 SYSTEM_PROMPT = """
 # IDENTIDADE
@@ -27,12 +27,13 @@ client = chromadb.HttpClient(host="localhost", port=8000)
 collection = client.get_collection("novatech")
 
 model = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+reranker = CrossEncoder("cross-encoder/mmarco-mMiniLMv2-L12-H384-v1")
 
 
 def montar_prompt(pergunta, chunks):
     contexto = ""
     for i, (doc, meta) in enumerate(chunks, 1):
-        contexto += f"[Trecho {i} — Fonte: {meta['source']}, Seção: {meta['section']}]\n{doc}\n\n"
+        contexto += f"[Trecho {i} — Fonte: {meta['source']}, Seção: {meta['section_path']}, Última Atualização: {meta['ultima_atualizacao']}]\n{doc}\n\n"
 
     return f"""{SYSTEM_PROMPT}
 
@@ -60,17 +61,26 @@ while True:
 
     resultados = collection.query(
         query_embeddings=[vetor_pergunta],
-        n_results=3
+        n_results=10
     )
 
-    chunks = list(zip(resultados["documents"][0], resultados["metadatas"][0]))
+    docs = resultados["documents"][0]
+    metas = resultados["metadatas"][0]
 
-    print("\n--- CHUNKS RECUPERADOS ---")
-    for doc, meta, score in zip(
-        resultados["documents"][0],
-        resultados["metadatas"][0],
-        resultados["distances"][0]
-    ):
+    pares = [(pergunta, doc) for doc in docs]
+    scores_reranker = reranker.predict(pares)
+
+    ranking = sorted(
+        zip(scores_reranker, docs, metas),
+        key=lambda x: x[0],
+        reverse=True
+    )
+
+    top3 = ranking[:3]
+    chunks = [(doc, meta) for _, doc, meta in top3]
+
+    print("\n--- CHUNKS RECUPERADOS (após reranking) ---")
+    for score, doc, meta in top3:
         print(f"  Score: {score:.4f} | [{meta['source']}] {meta['section']}")
     print()
 
