@@ -71,11 +71,11 @@ export function validateAndGuard(
 
 	// Detectors: carga perigosa (e variações) e devolução (e variações)
 	const hasDangerousLoad = /carga\s+perigosa|perigos[ao]/i.test(answerLower);
-	const hasRefund = /devolução|devolvê|reembol/i.test(answerLower);
+	const hasRefund = /devolução|devolv|reembol/i.test(answerLower);
 
 	if (hasDangerousLoad && hasRefund) {
 		// Ambos mencionados: verificar se há negativa
-		const hasNegation = /não\s+pode|não\s+é\s+possível|não\s+permitido|proibido|vedado/i.test(
+		const hasNegation = /não\s+pode|não\s+é\s+possível|não\s+permitido|proibido|vedad[ao]/i.test(
 			answerLower
 		);
 
