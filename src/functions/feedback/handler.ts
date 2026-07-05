@@ -3,7 +3,12 @@ import { CosmosClient } from '@azure/cosmos';
 import { feedbackSchema } from './validator';
 import { logger } from '../../shared/logger';
 
-const cosmosClient = new CosmosClient(process.env['COSMOS_CONNECTION_STRING'] ?? '');
+const cosmosConnectionString = process.env['COSMOS_CONNECTION_STRING'];
+if (!cosmosConnectionString) {
+  throw new Error('Variável de ambiente COSMOS_CONNECTION_STRING não definida');
+}
+
+const cosmosClient = new CosmosClient(cosmosConnectionString);
 const container = cosmosClient.database('novatech').container('feedbacks');
 
 export async function feedbackHandler(
