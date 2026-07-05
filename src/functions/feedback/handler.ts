@@ -1,32 +1,45 @@
-// feedback-handler.ts — gerado pelo Copilot
 import { app, HttpRequest, HttpResponseInit } from '@azure/functions';
+import { CosmosClient } from '@azure/cosmos';
+import { feedbackSchema } from './validator';
+import { logger } from '../../shared/logger';
+
+const cosmosClient = new CosmosClient(process.env['COSMOS_CONNECTION_STRING'] ?? '');
+const container = cosmosClient.database('novatech').container('feedbacks');
 
 export async function feedbackHandler(
   request: HttpRequest
 ): Promise<HttpResponseInit> {
-  const body = await request.json() as any;
+  const body = await request.json();
+  const parsed = feedbackSchema.safeParse(body);
+
+  if (!parsed.success) {
+    logger.warn({ errors: parsed.error.flatten() }, 'Payload de feedback inválido');
+    return { status: 400, body: JSON.stringify({ errors: parsed.error.flatten() }) };
+  }
+
+  const { queryId, rating, comment, attendantEmail } = parsed.data;
+
+  logger.info({ queryId, rating }, 'Feedback recebido');
 
   const feedback = {
-    queryId: body.queryId,
-    rating: body.rating,
-    comment: body.comment,
-    attendantEmail: body.attendantEmail,
-    timestamp: new Date().toISOString()
+    queryId,
+    rating,
+    comment,
+    attendantEmail,
+    timestamp: new Date().toISOString(),
   };
 
-  console.log('Feedback recebido:', JSON.stringify(feedback));
-
-  const { CosmosClient } = require('@azure/cosmos');
-  const client = new CosmosClient(process.env.COSMOS_CONNECTION_STRING);
-  const database = client.database('novatech');
-  const container = database.container('feedbacks');
-
-  await container.items.create(feedback);
+  try {
+    await container.items.create(feedback);
+  } catch (err) {
+    logger.error({ err, queryId }, 'Erro ao persistir feedback no Cosmos');
+    return { status: 500, body: 'Erro interno ao salvar feedback' };
+  }
 
   return { status: 200, body: 'OK' };
 }
 
 app.http('feedback', {
   methods: ['POST'],
-  handler: feedbackHandler
+  handler: feedbackHandler,
 });
